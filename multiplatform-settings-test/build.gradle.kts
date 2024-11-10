@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.gradle.targets.js.dsl.ExperimentalWasmDsl
+
 /*
  * Copyright 2019 Russell Wolf
  *
@@ -15,16 +17,20 @@
  */
 
 plugins {
-    id("com.android.library")
-    kotlin("multiplatform")
-    id("org.jetbrains.dokka")
-    `maven-publish`
-    signing
+    id("standard-configuration")
+    id("module-publication")
 }
 
-standardConfiguration()
+standardConfig {
+    defaultTargets()
+}
 
 kotlin {
+    @OptIn(ExperimentalWasmDsl::class)
+    wasmWasi {
+        nodejs()
+    }
+
     sourceSets {
         commonMain {
             dependencies {
@@ -35,37 +41,7 @@ kotlin {
             dependencies {
                 implementation(project(":tests"))
 
-                implementation(kotlin("test"))
-            }
-        }
-
-        val androidMain by getting {
-            dependencies {
-            }
-        }
-        val androidUnitTest by getting {
-            dependencies {
-                implementation("junit:junit:${Versions.junit}")
-            }
-        }
-
-        val jvmMain by getting {
-            dependencies {
-            }
-        }
-        val jvmTest by getting {
-            dependencies {
-                implementation("junit:junit:${Versions.junit}")
-            }
-        }
-
-        val jsMain by getting {
-            dependencies {
-            }
-        }
-        val jsTest by getting {
-            dependencies {
-                implementation(kotlin("test-js"))
+                implementation(libs.kotlin.test)
             }
         }
     }
@@ -73,4 +49,7 @@ kotlin {
 
 android {
     namespace = "com.russhwolf.settings.test"
+
+    // Oops, this was on in 1.0, so now it's technically a breaking change to turn it off
+    buildFeatures.buildConfig = true
 }

@@ -14,53 +14,48 @@
  * limitations under the License.
  */
 
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
-    kotlin("multiplatform")
-    id("com.android.library")
-    id("org.jetbrains.dokka")
-    `maven-publish`
-    signing
+    id("standard-configuration")
+    id("module-publication")
 }
 
-standardConfiguration(
-    "android",
-    "jvm"
-)
-
 kotlin {
-    androidTarget()
+    androidTarget {
+        publishAllLibraryVariants()
+    }
+    iosArm64()
+    iosSimulatorArm64()
+    iosX64()
+    jvm()
+    linuxX64()
+    macosArm64()
+    macosX64()
 
     sourceSets {
-        val commonMain by getting {
+        commonMain {
             dependencies {
                 implementation(project(":multiplatform-settings"))
                 implementation(project(":multiplatform-settings-coroutines"))
 
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:${Versions.coroutines}")
+                implementation(libs.kotlinx.coroutines.core)
+
+                implementation(libs.androidx.datastore.preferences.core)
             }
         }
-        val commonTest by getting {
+        commonTest {
             dependencies {
-                implementation(kotlin("test"))
+                implementation(libs.kotlin.test)
 
                 implementation(project(":tests"))
                 implementation(project(":multiplatform-settings-test"))
 
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:${Versions.coroutines}")
+                implementation(libs.kotlinx.coroutines.test)
 
-                implementation("app.cash.turbine:turbine:${Versions.turbine}")
-            }
-        }
-        val jvmCommonMain by getting {
-            dependencies {
-                implementation("androidx.datastore:datastore-preferences-core:${Versions.androidxDatastore}")
-            }
-        }
-        val jvmCommonTest by getting {
-            dependencies {
-                implementation("junit:junit:${Versions.junit}")
+                implementation(libs.turbine)
+                implementation(libs.okio.fakefilesystem)
             }
         }
     }
@@ -75,6 +70,8 @@ android {
 }
 
 tasks.withType<KotlinCompile> {
-    kotlinOptions.jvmTarget = "1.8"
-    kotlinOptions.freeCompilerArgs += "-Xjvm-default=all"
+    compilerOptions {
+        jvmTarget = JvmTarget.JVM_1_8
+        freeCompilerArgs.add("-Xjvm-default=all")
+    }
 }

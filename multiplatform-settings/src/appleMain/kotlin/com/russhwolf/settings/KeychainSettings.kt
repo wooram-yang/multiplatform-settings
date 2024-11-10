@@ -27,6 +27,7 @@ import kotlinx.cinterop.MemScope
 import kotlinx.cinterop.UnsafeNumber
 import kotlinx.cinterop.alloc
 import kotlinx.cinterop.allocArrayOf
+import kotlinx.cinterop.convert
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.ptr
 import kotlinx.cinterop.reinterpret
@@ -37,7 +38,6 @@ import platform.CoreFoundation.CFArrayRefVar
 import platform.CoreFoundation.CFDictionaryCreate
 import platform.CoreFoundation.CFDictionaryGetValue
 import platform.CoreFoundation.CFDictionaryRef
-import platform.CoreFoundation.CFIndex
 import platform.CoreFoundation.CFStringRef
 import platform.CoreFoundation.CFTypeRef
 import platform.CoreFoundation.CFTypeRefVar
@@ -64,6 +64,7 @@ import platform.Security.SecItemAdd
 import platform.Security.SecItemCopyMatching
 import platform.Security.SecItemDelete
 import platform.Security.SecItemUpdate
+import platform.Security.errSecDuplicateItem
 import platform.Security.errSecItemNotFound
 import platform.Security.kSecAttrAccount
 import platform.Security.kSecAttrService
@@ -76,6 +77,9 @@ import platform.Security.kSecReturnAttributes
 import platform.Security.kSecReturnData
 import platform.Security.kSecValueData
 import platform.darwin.OSStatus
+import kotlin.experimental.ExperimentalNativeApi
+import kotlin.native.ref.Cleaner
+import kotlin.native.ref.createCleaner
 
 /**
  * A collection of storage-backed key-value data
@@ -96,17 +100,29 @@ import platform.darwin.OSStatus
  * every key, if the default behavior does not fit your needs.
  */
 @ExperimentalSettingsImplementation
-public class KeychainSettings @ExperimentalSettingsApi constructor(vararg defaultProperties: Pair<CFStringRef?, CFTypeRef?>) :
-    Settings {
+public class KeychainSettings : Settings {
 
-    @OptIn(ExperimentalSettingsApi::class) // IDE is wrong when it says this is redundant
-    // NB this calls CFBridgingRetain() without ever calling CFBridgingRelease()
-    public constructor(service: String) : this(kSecAttrService to CFBridgingRetain(service))
+    @OptIn(ExperimentalNativeApi::class)
+    private val cleaner: Cleaner?
+
+    @ExperimentalSettingsApi
+    public constructor(vararg defaultProperties: Pair<CFStringRef?, CFTypeRef?>) {
+        this.defaultProperties = mapOf(kSecClass to kSecClassGenericPassword, *defaultProperties)
+        @OptIn(ExperimentalNativeApi::class)
+        cleaner = null
+    }
+
+    public constructor(service: String) {
+        val cfService = CFBridgingRetain(service)
+        defaultProperties = mapOf(kSecClass to kSecClassGenericPassword, kSecAttrService to cfService)
+        @OptIn(ExperimentalNativeApi::class)
+        cleaner = createCleaner(cfService) { CFBridgingRelease(it) }
+    }
 
     @OptIn(ExperimentalSettingsApi::class) // IDE is wrong when it says this is redundant
     public constructor() : this(*emptyArray())
 
-    private val defaultProperties = mapOf(kSecClass to kSecClassGenericPassword) + mapOf(*defaultProperties)
+    private val defaultProperties: Map<CFStringRef?, CFTypeRef?>
 
     /**
      * A factory that can produce [Settings] instances.
@@ -132,7 +148,7 @@ public class KeychainSettings @ExperimentalSettingsApi constructor(vararg defaul
 
             return buildSet {
                 for (i in 0..<CFArrayGetCount(attributes.value)) {
-                    val item: CFDictionaryRef? = CFArrayGetValueAtIndex(attributes.value, i.toCFIndex())?.reinterpret()
+                    val item: CFDictionaryRef? = CFArrayGetValueAtIndex(attributes.value, i.convert())?.reinterpret()
                     val cfKey: CFStringRef? = CFDictionaryGetValue(item, kSecAttrAccount)?.reinterpret()
                     if (cfKey != null) {
                         val nsKey = CFBridgingRelease(cfKey) as NSString
@@ -187,36 +203,36 @@ public class KeychainSettings @ExperimentalSettingsApi constructor(vararg defaul
     public override fun getBoolean(key: String, defaultValue: Boolean): Boolean = getBooleanOrNull(key) ?: defaultValue
     public override fun getBooleanOrNull(key: String): Boolean? = unarchiveNumber(getKeychainItem(key))?.boolValue
 
-    private inline fun unarchiveNumber(data: NSData?): NSNumber? =
+    private fun unarchiveNumber(data: NSData?): NSNumber? =
         data?.let { NSKeyedUnarchiver.unarchiveObjectWithData(it) } as? NSNumber
 
-    private inline fun archiveNumber(number: NSNumber): NSData? =
+    private fun archiveNumber(number: NSNumber): NSData? =
         NSKeyedArchiver.archivedDataWithRootObject(number, true, null)
 
-    private inline fun addOrUpdateKeychainItem(key: String, value: NSData?) {
-        if (hasKeychainItem(key)) {
+    private fun addOrUpdateKeychainItem(key: String, value: NSData?) {
+        if(!addKeychainItem(key, value)) {
             updateKeychainItem(key, value)
-        } else {
-            addKeychainItem(key, value)
         }
     }
 
-    private inline fun addKeychainItem(key: String, value: NSData?): Unit = cfRetain(key, value) { cfKey, cfValue ->
+    private fun addKeychainItem(key: String, value: NSData?): Boolean = cfRetain(key, value) { cfKey, cfValue ->
         val status = keyChainOperation(
             kSecAttrAccount to cfKey,
             kSecValueData to cfValue
         ) { SecItemAdd(it, null) }
-        status.checkError()
+        status.checkError(errSecDuplicateItem)
+
+        status != errSecDuplicateItem
     }
 
-    private inline fun removeKeychainItem(key: String): Unit = cfRetain(key) { cfKey ->
+    private fun removeKeychainItem(key: String): Unit = cfRetain(key) { cfKey ->
         val status = keyChainOperation(
             kSecAttrAccount to cfKey,
         ) { SecItemDelete(it) }
         status.checkError(errSecItemNotFound)
     }
 
-    private inline fun updateKeychainItem(key: String, value: NSData?): Unit = cfRetain(key, value) { cfKey, cfValue ->
+    private fun updateKeychainItem(key: String, value: NSData?): Unit = cfRetain(key, value) { cfKey, cfValue ->
         val status = keyChainOperation(
             kSecAttrAccount to cfKey,
             kSecReturnData to kCFBooleanFalse
@@ -229,7 +245,7 @@ public class KeychainSettings @ExperimentalSettingsApi constructor(vararg defaul
         status.checkError()
     }
 
-    private inline fun getKeychainItem(key: String): NSData? = cfRetain(key) { cfKey ->
+    private fun getKeychainItem(key: String): NSData? = cfRetain(key) { cfKey ->
         val cfValue = alloc<CFTypeRefVar>()
         val status = keyChainOperation(
             kSecAttrAccount to cfKey,
@@ -243,7 +259,7 @@ public class KeychainSettings @ExperimentalSettingsApi constructor(vararg defaul
         CFBridgingRelease(cfValue.value) as? NSData
     }
 
-    private inline fun hasKeychainItem(key: String): Boolean = cfRetain(key) { cfKey ->
+    private fun hasKeychainItem(key: String): Boolean = cfRetain(key) { cfKey ->
         val status = keyChainOperation(
             kSecAttrAccount to cfKey,
             kSecMatchLimit to kSecMatchLimitOne
@@ -262,7 +278,7 @@ public class KeychainSettings @ExperimentalSettingsApi constructor(vararg defaul
         return output
     }
 
-    private inline fun OSStatus.checkError(vararg expectedErrors: OSStatus) {
+    private fun OSStatus.checkError(vararg expectedErrors: OSStatus) {
         if (this != 0 && this !in expectedErrors) {
             val cfMessage = SecCopyErrorMessageString(this, null)
             val nsMessage = CFBridgingRelease(cfMessage) as? NSString
@@ -273,10 +289,10 @@ public class KeychainSettings @ExperimentalSettingsApi constructor(vararg defaul
 
 }
 
-internal inline fun MemScope.cfDictionaryOf(vararg items: Pair<CFStringRef?, CFTypeRef?>): CFDictionaryRef? =
+internal fun MemScope.cfDictionaryOf(vararg items: Pair<CFStringRef?, CFTypeRef?>): CFDictionaryRef? =
     cfDictionaryOf(mapOf(*items))
 
-internal inline fun MemScope.cfDictionaryOf(map: Map<CFStringRef?, CFTypeRef?>): CFDictionaryRef? {
+internal fun MemScope.cfDictionaryOf(map: Map<CFStringRef?, CFTypeRef?>): CFDictionaryRef? {
     val size = map.size
     val keys = allocArrayOf(*map.keys.toTypedArray())
     val values = allocArrayOf(*map.values.toTypedArray())
@@ -284,7 +300,7 @@ internal inline fun MemScope.cfDictionaryOf(map: Map<CFStringRef?, CFTypeRef?>):
         kCFAllocatorDefault,
         keys.reinterpret(),
         values.reinterpret(),
-        size.toCFIndex(),
+        size.convert(),
         null,
         null
     )
@@ -292,10 +308,10 @@ internal inline fun MemScope.cfDictionaryOf(map: Map<CFStringRef?, CFTypeRef?>):
 
 // Turn casts into dot calls for better readability
 @Suppress("CAST_NEVER_SUCCEEDS")
-internal inline fun String.toNSString() = this as NSString
+internal fun String.toNSString() = this as NSString
 
 @Suppress("CAST_NEVER_SUCCEEDS")
-internal inline fun NSString.toKString() = this as String
+internal fun NSString.toKString() = this as String
 
 internal inline fun <T> cfRetain(value: Any?, block: MemScope.(CFTypeRef?) -> T): T = memScoped {
     val cfValue = CFBridgingRetain(value)
@@ -317,5 +333,3 @@ internal inline fun <T> cfRetain(value1: Any?, value2: Any?, block: MemScope.(CF
             CFBridgingRelease(cfValue2)
         }
     }
-
-internal expect fun Number.toCFIndex(): CFIndex

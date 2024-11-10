@@ -8,56 +8,59 @@
 
 This is a Kotlin library for Multiplatform apps, so that common code can persist key-value data.
 
+A [Korean translation](https://github.com/wooram-yang/multiplatform-settings/blob/feature/add_ko_readme_file/README-ko.md)
+of this readme is available separately, maintained by @wooram-yang
+
 ## Table of contents
 
 <!-- TODO it's maybe getting time to break this up into separate pages and do a real docs site -->
 
-* [Adding to your project](#adding-to-your-project)
 * [Usage](#usage)
-  * [Creating a Settings instance](#creating-a-settings-instance)
-    * [Platform constructors](#platform-constructors)
-    * [Factories](#factories)
-    * [No-arg module](#no-arg-module)
-  * [Settings API](#settings-api)
-    * [Listeners](#listeners)
-    * [Testing](#testing)
-  * [Other platforms](#other-platforms)
+  + [Implementation Summary](#implementation-summary)
+  + [Creating a Settings instance](#creating-a-settings-instance)
+    - [Platform constructors](#platform-constructors)
+    - [Factories](#factories)
+    - [No-arg module](#no-arg-module)
+  + [Settings API](#settings-api)
+    - [Listeners](#listeners)
+    - [Testing](#testing)
+  + [Other platforms](#other-platforms)
 * [Experimental API](#experimental-api)
-  * [Experimental Implementations](#experimental-implementations)
-    * [Apple Keychain](#apple-keychain)
-  * [Serialization module](#serialization-module)
-  * [Coroutine APIs](#coroutine-apis)
-    * [DataStore](#datastore)
+  + [Experimental Implementations](#experimental-implementations)
+    - [Apple Keychain](#apple-keychain)
+  + [Serialization module](#serialization-module)
+  + [Coroutine APIs](#coroutine-apis)
+    - [DataStore](#datastore)
+  + [Make-Observable module](#make-observable-module)
+* [Adding to your project](#adding-to-your-project)
 * [Building](#building)
 * [License](#license)
 
-## Adding to your project
-
-Multiplatform Settings is currently published to Maven Central, so add that to repositories.
-
-```kotlin
-repositories {
-    mavenCentral()
-    // ...
-}
-```
-
-Then, simply add the dependency to your common source-set dependencies
-
-```kotlin
-commonMain {
-    dependencies {
-        // ...
-        implementation("com.russhwolf:multiplatform-settings:1.1.1")
-    }
-}
-``` 
-
-See also the sample project, which uses this structure.
-
 ## Usage
 
-The `Settings` interface has implementations on the Android, iOS, macOS, watchOS, tvOS, JS, JVM, and Windows platforms.
+The `Settings` interface has implementations on the Android, iOS, macOS, watchOS, tvOS, JS, WasmJS, JVM, and Windows
+platforms.
+
+### Implementation Summary
+
+The following table shows the names of implementing classes and what platforms they're available on.
+
+| Class                                   | Backing API                         | Platforms                 |
+|-----------------------------------------|-------------------------------------|---------------------------|
+| `KeychainSettings`<sup>2</sup>          | Apple Keychain                      | iOS, macOS, watchOS, tvOS |
+| `NSUserDefaultsSettings`<sup>1</sup>    | User Defaults                       | iOS, macOS, watchOS, tvOS |
+| `PreferencesSettings`<sup>1</sup>       | `java.util.prefs.Preferences`       | JVM                       |
+| `PropertiesSettings`                    | `java.util.Properties`              | JVM                       |
+| `SharedPreferencesSettings`<sup>1</sup> | `android.content.SharedPreferences` | Android                   |
+| `StorageSettings`                       | Web Storage (localStorage)          | JS, WasmJS                |
+| `RegistrySettings`<sup>2</sup>          | Windows Registry                    | MingwX64                  |
+| `MapSettings`<sup>1,3</sup>             | `kotlin.collections.MutableMap`     | All platforms             |
+
+<sup>
+<sup>1</sup>Implements ObservableSettings interface<br/>
+<sup>2</sup>Implementations is considered experimental<br/>
+<sup>3</sup>MapSettings is intended for use in unit tests and will not persist data to storage
+</sup>
 
 ### Creating a Settings instance
 
@@ -134,7 +137,7 @@ val delegate: Properties // ...
 val settings: Settings = PropertiesSettings(delegate)
 ```
 
-On JS, `StorageSettings` wraps `Storage`.
+On JS and WasmJS, `StorageSettings` wraps `Storage`.
 
 ```kotlin
 val delegate: Storage // ...
@@ -185,7 +188,7 @@ the `multiplatform-settings-no-arg` gradle dependency. This exports `multiplatfo
 you can use it as a replacement for that default dependency.
 
 ```kotlin
-implementation("com.russhwolf:multiplatform-settings-no-arg:1.1.1")
+implementation("com.russhwolf:multiplatform-settings-no-arg:1.2.0")
 ```
 
 Then from common code, you can write
@@ -317,7 +320,7 @@ garbage-collected and stop sending updates.
 A testing dependency is available to aid in testing code that interacts with this library.
 
 ```kotlin
-implementation("com.russhwolf:multiplatform-settings-test:1.1.1")
+implementation("com.russhwolf:multiplatform-settings-test:1.2.0")
 ```    
 
 This includes a `MapSettings` implementation of the `Settings` interface, which is backed by an in-memory `MutableMap`
@@ -348,7 +351,7 @@ them, to help remove that experimental status.
 A `kotlinx-serialization` integration exists so it's easier to save non-primitive data
 
 ```kotlin
-implementation("com.russhwolf:multiplatform-settings-serialization:1.1.1")
+implementation("com.russhwolf:multiplatform-settings-serialization:1.2.0")
 ```
 
 This essentially uses the `Settings` store as a serialization format. Thus for a serializable class
@@ -394,6 +397,16 @@ val someClass: SomeClass by settings.serializedValue(SomeClass.serializer(), "so
 val nullableSomeClass: SomeClass? by settings.nullableSerializedValue(SomeClass.serializer(), "someClass")
 ```
 
+All APIs also have variants that infer a serializer implicitly rather than taking one as a parameter. These APIs throw
+if the class is not serializable.
+
+```kotlin
+settings.encodeValue("key", someClass)
+val newInstance: SomeClass = settings.decodeValue("key", defaultValue)
+val nullableNewInstance: SomeClass = settings.decodeValueOrNull("key")
+// etc
+```
+
 Usage requires accepting both the `@ExperimentalSettingsApi` and `@ExperimentalSerializationApi` annotations.
 
 ### Coroutine APIs
@@ -401,15 +414,26 @@ Usage requires accepting both the `@ExperimentalSettingsApi` and `@ExperimentalS
 A separate `multiplatform-settings-coroutines` dependency includes various coroutine APIs.
 
 ```kotlin
-implementation("com.russhwolf:multiplatform-settings-coroutines:1.1.1")
+implementation("com.russhwolf:multiplatform-settings-coroutines:1.2.0")
 ```
 
 This adds flow extensions for all types which use the listener APIs internally.
 
 ```kotlin
 val observableSettings: ObservableSettings // Only works with ObservableSettings
-val flow: Flow<Int> by observableSettings.intFlow("key", defaultValue)
-val nullableFlow: Flow<Int?> by observableSettings.intOrNullFlow("key")
+
+val flow: Flow<Int> by observableSettings.getIntFlow("key", defaultValue)
+val nullableFlow: Flow<Int?> by observableSettings.getIntOrNullFlow("key")
+```
+
+There are also `StateFlow` extensions, which require a coroutine scope.
+
+```kotlin
+val observableSettings: ObservableSettings // Only works with ObservableSettings
+val coroutineScope: CoroutineScope
+
+val stateFlow: StateFlow<Int> by observableSettings.getIntStateFlow("key", defaultValue)
+val nullableStateFlow: StateFlow<Int?> by observableSettings.getIntOrNullStateFlow("key")
 ```
 
 In addition, there are two new `Settings`-like interfaces: `SuspendSettings`, which looks similar to `Settings` but all
@@ -441,11 +465,13 @@ val blockingSettings: ObservableSettings = flowSettings.toBlockingObservableSett
 
 #### DataStore
 
-An implementation of `FlowSettings` on the Android exists in the `multiplatform-settings-datastore` dependency, based
-on [Jetpack DataStore](https://developer.android.com/jetpack/androidx/releases/datastore)
+An implementation of `FlowSettings` exists in the `multiplatform-settings-datastore` dependency, based
+on [Jetpack DataStore](https://developer.android.com/jetpack/androidx/releases/datastore). Because DataStore is now a
+multiplatform library, starting in version 1.2.0, this module is available on all platforms where DataStore is
+available, rather than being limited to Android and JVM.
 
 ```kotlin
-implementation("com.russhwolf:multiplatform-settings-datastore:1.1.1")
+implementation("com.russhwolf:multiplatform-settings-datastore:1.2.0")
 ```
 
 This provides a `DataStoreSettings` class
@@ -483,6 +509,44 @@ actual val settings: SuspendSettings = NSUserDefaultsSettings(/*...*/).toSuspend
 // JS
 actual val settings: SuspendSettings = StorageSettings().toSuspendSettings()
 ```
+
+### Make-Observable module
+
+The experimental `multiplatform-settings-make-observable` module adds an extension function `Settings.makeObservable()`
+in common ode which converts a `Settings` instance to `ObservableSettings` by directly wiring in callbacks rather than
+native observability methods.
+
+```kotlin
+val settings: Settings // = ...
+val observableSettings: ObservableSettings = settings.makeObservable()
+```
+
+This has the advantage of enabling observability on platforms which don't have an observable implementation. It has the
+disadvantage that updates will only be delivered to the same instance where changes were made.
+
+## Adding to your project
+
+Multiplatform Settings is currently published to Maven Central, so add that to repositories.
+
+```kotlin
+repositories {
+  mavenCentral()
+  // ...
+}
+```
+
+Then, simply add the dependency to your common source-set dependencies
+
+```kotlin
+commonMain {
+  dependencies {
+    // ...
+    implementation("com.russhwolf:multiplatform-settings:1.2.0")
+  }
+}
+``` 
+
+See also the sample project, which uses this structure.
 
 ## Building
 
